@@ -1,0 +1,208 @@
+#include "freewheel.hpp"
+#include "arm_math.h"
+#include "easy_crc.h"
+#include "gpio.h"
+#include "main.h"
+#include "stdio.h"
+#include "string.h"
+#include "usbd_cdc_if.h"
+#include <memory.h>
+
+#define F32_2_PI 6.28318530717958f
+#define F32_PI 3.14159265358979f
+#define F32_PI_2 1.57079632679489f
+
+Free_Wheel free_wheel;
+
+int32_t total_mid_count = 0;
+int32_t total_right_count = 0;
+int32_t total_left_count = 0;
+
+float &x =
+  free_wheel.free_wheel_data.pose.x; /**< X-coordinate (meter) of the robot. */
+float &y =
+  free_wheel.free_wheel_data.pose.y; /**< Y-coordinate (meter) of the robot. */
+float &theta =
+  free_wheel.free_wheel_data.pose
+    .theta; /**< Orientation (yaw angle in radians) of the robot. */
+
+float &vx = free_wheel.free_wheel_data.twist
+              .vx; /**< Linear velocity in x-direction (meter/second). */
+float &vy = free_wheel.free_wheel_data.twist
+              .vy; /**< Linear velocity in y-direction (meter/second). */
+float &omega = free_wheel.free_wheel_data.twist
+                 .w; /**< Angular velocity (radian/second) of the robot. */
+
+float32_t degreeChange(float32_t curr, float32_t prev) {
+  float32_t change;
+
+  if ((prev > 90) && (curr < -90)) {
+    change = (180 - prev) + (180 + curr);
+  } else if ((prev < -90) && (curr > 90)) {
+    change = -(180 + prev) - (180 - curr);
+  } else {
+    change = curr - prev;
+  }
+
+  return change;
+}
+
+float32_t radianChange(float32_t curr, float prev) {
+  float32_t change;
+
+  if ((prev > F32_PI_2) && (curr < -F32_PI_2)) {
+    change = (F32_PI - prev) + (F32_PI + curr);
+  } else if ((prev < -F32_PI_2) && (curr > F32_PI_2)) {
+    change = -(F32_PI + prev) - (F32_PI - curr);
+  } else {
+    change = curr - prev;
+  }
+
+  return change;
+}
+
+float32_t angleClamp(float32_t angle) {
+  if (angle > F32_PI) {
+    angle -= F32_2_PI;
+  } else if (angle < (-F32_PI)) {
+    angle += F32_2_PI;
+  }
+  return angle;
+}
+
+void run_code() {
+  free_wheel.init();
+  uint32_t loop_tick = 0;
+  uint32_t now;
+  uint32_t thing = HAL_GetTick();
+
+  while (1) {
+    now = HAL_GetTick();
+
+    if (now - loop_tick < 5) continue;
+
+    loop_tick = HAL_GetTick();
+
+    free_wheel.read_data();
+    free_wheel.process_data();
+
+#ifdef USE_USB
+
+    free_wheel.send_data();
+
+    // printf("%li\t%li\t%li\n", free_wheel.mid_enc.get_count(), free_wheel.right_enc.get_count(), free_wheel.left_enc.get_count());
+    // // // //
+
+    // printf("x:%i y:%i theta:%i vx:%i vy:%i w:%i\n",
+    // 	     (int)(free_wheel.free_wheel_data.pose.x * 100),
+    // 	     (int)(free_wheel.free_wheel_data.pose.y * 100),
+    // 	     (int)(free_wheel.free_wheel_data.pose.theta * 100),
+    // 	     (int)(free_wheel.free_wheel_data.twist.vx * 100),
+    // 	     (int)(free_wheel.free_wheel_data.twist.vy * 100),
+    // 	     (int)(free_wheel.free_wheel_data.twist.w * 100)
+    // 	     );
+
+    if (HAL_GetTick() - thing > 500) {
+      HAL_GPIO_TogglePin(BLINK_LED_GPIO_Port, BLINK_LED_Pin);
+      thing = HAL_GetTick();
+    }
+
+#else
+    if (HAL_UART_Transmit_DMA(
+          &huart2,
+          free_wheel.sending_bytes,
+          sizeof(free_wheel.free_wheel_data) + 2
+        ) != HAL_OK) {
+      static uint32_t red_led_tick = 0;
+      if (now - red_led_tick > 20) {
+        HAL_GPIO_TogglePin(BLINK_GPIO_Port, RED_LED_Pin);
+        red_led_tick = now;
+      }
+    }
+#endif
+  }
+}
+
+//@brief Initializes the Free_Wheel object.
+void Free_Wheel::init() {
+  mid_enc.init();
+  right_enc.init();
+  left_enc.init();
+}
+
+void Free_Wheel::read_data() {
+  mid_count = mid_enc.get_count(
+  ); // adjust such that left move of robot gives positive count to mid encoder
+  right_count = right_enc.get_count(
+  ); // adjust such that forward move gives positive count to right encoder
+  left_count = left_enc.get_count(
+  ); // adjust such that forward move gives positive count to left encoder
+
+  total_mid_count += mid_count;
+  total_right_count += right_count;
+  total_left_count += left_count;
+
+  mid_omega = mid_enc.get_omega();
+  right_omega = right_enc.get_omega();
+  left_omega = left_enc.get_omega();
+
+  mid_enc.reset_encoder_count();
+  right_enc.reset_encoder_count();
+  left_enc.reset_encoder_count();
+
+  // printf("cnt: %ld %ld %ld\n", total_mid_count, total_right_count, total_left_count);
+}
+
+void Free_Wheel::process_data() {
+  //    uint32_t now = HAL_GetTick();
+
+  float mid_dist = F32_PI * Wheel_Diameter * (float)mid_count / (float)CPR;
+  float right_dist = F32_PI * Wheel_Diameter * (float)right_count / (float)CPR;
+  float left_dist = F32_PI * Wheel_Diameter * (float)left_count / (float)CPR;
+
+  float mid_vel = mid_omega * Wheel_Diameter / 2.0f;
+  float right_vel = right_omega * Wheel_Diameter / 2.0f;
+  float left_vel = left_omega * Wheel_Diameter / 2.0f;
+
+  float d_theta = (right_dist - left_dist) / (LEFT_RADIUS + RIGHT_RADIUS);
+
+  float dx = (right_dist * LEFT_RADIUS + left_dist * RIGHT_RADIUS) /
+    (LEFT_RADIUS + RIGHT_RADIUS);
+  float dy = mid_dist +
+    MID_RADIUS * d_theta; // (-) for mid encoder at back and (+) for front
+
+  float theta_t = angleClamp(theta + d_theta / 2.0f);
+  float cos_value = cos(theta_t);
+  float sin_value = sin(theta_t);
+
+
+  // X and Y are added by converting them into global frame data
+  x += dx * cos_value - dy * sin_value;
+  y += dx * sin_value + dy * cos_value;
+  theta = angleClamp(theta + d_theta);
+
+
+  
+  //// Note, the VX and VY are in teir own frame, not the global frame, here
+  //// The Drifting of angle does not exist, should it should be the more trustworthy
+  //// Data for the EKF
+  omega = (right_vel - left_vel) / (RIGHT_RADIUS + LEFT_RADIUS);
+  vx = (right_vel * LEFT_RADIUS + left_vel * RIGHT_RADIUS) /
+    (RIGHT_RADIUS + LEFT_RADIUS);
+  vy = mid_vel + omega * MID_RADIUS;
+
+  struct Pose pose = {x, y, theta};
+  struct Twist twist = {vx, vy, omega};
+
+  struct FreeWheelData data = {pose, twist};
+
+  sending_bytes[0] = START_BYTE;
+  memcpy(&sending_bytes[1], &data, sizeof(FreeWheelData));
+
+  sending_bytes[sizeof(FreeWheelData) + 1] =
+    calculate_cr8x_fast((uint8_t *)&data, sizeof(FreeWheelData));
+}
+
+void Free_Wheel::send_data() {
+  CDC_Transmit_FS(sending_bytes, sizeof(sending_bytes));
+}

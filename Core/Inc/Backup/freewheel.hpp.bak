@@ -1,0 +1,124 @@
+#include "bridge.h"
+#include "encoder.hpp"
+#include "tim.h"
+#include <cstdint>
+
+/**
+ * @brief Radius of the back wheel in meter.
+ */
+//#define MID_RADIUS 0.036f
+#define MID_RADIUS 0.235f
+
+/**
+ * @brief Radius of the right wheel in meter.
+ */
+//#define RIGHT_RADIUS 0.225f
+#define RIGHT_RADIUS 0.32f
+
+/**
+ * @brief Radius of the left wheel in meter.
+ */
+//#define LEFT_RADIUS 0.233f
+#define LEFT_RADIUS 0.165f
+
+/**
+ * @brief Diameter of the wheels in meter.
+ */
+#define Wheel_Diameter 0.0574f
+
+/**
+ * @brief Start byte for data transmission.
+ */
+#define START_BYTE 0xA5
+
+/**
+ * @brief Counts per revolution for encoders.
+ */
+#define CPR 4000U
+
+/**
+ * @brief Structure representing the pose (position and orientation) of the robot.
+ */
+
+#pragma pack(push, 1)
+struct Pose {
+  float x; /**< X-coordinate. */
+  float y; /**< Y-coordinate. */
+  float theta; /**< Orientation (angle in radians). */
+};
+
+struct YawPitchRoll {
+  float yaw;
+  float pitch;
+  float roll;
+};
+
+/**
+ * @brief Structure representing the twist (linear and angular velocities) of the robot.
+ */
+struct Twist {
+  float vx; /**< Linear velocity in the x-direction. */
+  float vy; /**< Linear velocity in the y-direction. */
+  float w; /**< Angular velocity. */
+};
+
+struct EncoderCount {
+  int32_t mid;
+  int32_t right;
+  int32_t left;
+};
+
+struct FreeWheelData {
+  Pose pose;
+  Twist twist;
+  //  Bno08::ImuData imu;
+};
+#pragma pack(pop)
+
+class Free_Wheel {
+public:
+  /**
+   * @brief Default constructor.
+   */
+  Free_Wheel() = default;
+
+  /**
+   * @brief Default destructor.
+   */
+  ~Free_Wheel() = default;
+
+  /**
+   * @brief Initialize the Free_Wheel object.
+   */
+  void init();
+
+  /**
+   * @brief Read data from encoders and update the robot state.
+   */
+  void read_data();
+
+  /**
+   * @brief Process the collected data.
+   */
+  void process_data();
+
+  void send_data();
+
+  FreeWheelData free_wheel_data{0, 0, 0, 0, 0, 0};
+
+  Encoder mid_enc{&htim1, CPR, 5, true}; /**< Encoder for the back wheel. */
+  Encoder left_enc{&htim3, CPR, 5, true}; /**< Encoder for the right wheel. */
+  Encoder right_enc{&htim2, CPR, 5, false}; /**< Encoder for the left wheel. */
+
+  int32_t mid_count; /**< Count from the back wheel encoder. */
+  int32_t right_count; /**< Count from the right wheel encoder. */
+  int32_t left_count; /**< Count from the left wheel encoder. */
+
+  // with respect to robot itself
+  float mid_omega; /**< Angular velocity of the back wheel. */
+  float right_omega; /**< Angular velocity of the right wheel. */
+  float left_omega; /**< Angular velocity of the left wheel. */
+
+  uint8_t sending_bytes
+  [sizeof(free_wheel_data) + 2]; /**< Buffer for storing data to be transmitted. */
+};

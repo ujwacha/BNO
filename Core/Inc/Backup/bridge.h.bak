@@ -1,0 +1,37 @@
+#ifdef __cplusplus
+#include <stdint.h>
+extern "C" {
+#endif
+
+  void run_code(void);
+
+/* #define START_BYTE_PACK 0xAA */
+/* #define END_BYTE_PACK 0xBB */
+/* #define USED_UART huart3 */
+
+  typedef struct __attribute__((packed)) {
+    /// uint8_t start_byte; // commented with lib to make it work with uart.hpp library
+
+    // Twist For Base
+    float x;
+    float y;
+    float omega;
+
+    // Vector For Shooter
+    uint8_t ax;
+    uint8_t ay;
+    uint8_t az;
+
+    // Position of Catcher
+    uint8_t on_off;
+    uint8_t theta;
+    uint8_t zz;
+
+    // end byte and crc
+    uint8_t end_byte;
+    //    uint8_t crc;
+  } CommunicationData;
+
+#ifdef __cplusplus
+}
+#endif

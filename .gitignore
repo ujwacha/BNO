@@ -1,0 +1,7 @@
+build/
+*~
+TAGS
+update_source_files.sh
+compile_commands.json
+included_files.txt
+.cache/
