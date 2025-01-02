@@ -35,7 +35,7 @@ public:
 
   CommunicationData send;
 
-  Bno08 bno = Bno08(&huart3);
+  Bno08 bno = Bno08(&huart3, BNO_RST_GPIO_Port, BNO_RST_Pin);
 
   uint8_t sending_bytes[sizeof(CommunicationData) + 2];
 
